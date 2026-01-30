@@ -6,117 +6,137 @@ import numpy as np
 import mediapipe as mp
 import math
 
-# 1. Setup Camera and Face Mesh
+# 1. Setup Camera and MediaPipe
 cam = cv2.VideoCapture(0)
-face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
+face_mesh = mp.solutions.face_mesh.FaceMesh(
+    max_num_faces=1,
+    refine_landmarks=True, # Enables Iris landmarks
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
 
 # 2. Variables for Blinking
 blink_counter = 0
-blink_counter_frame = 0  # To prevent double counting (Debouncing)
-BLINK_THRESHOLD = 0.35   # If ratio is below this, it's a blink
+blink_counter_frame = 0  
+BLINK_THRESHOLD = 0.35   # Lower = harder to detect blink, Higher = easier
 
-# Helper function to calculate distance between two points (x, y)
+# 3. Landmark Indices (Constants)
+# Left Eye
+LEFT_IRIS = 468
+LEFT_KEY_POINTS = [33, 133, 159, 145] # [Inner, Outer, Top, Bottom]
+
+# Right Eye
+RIGHT_IRIS = 473
+RIGHT_KEY_POINTS = [362, 263, 386, 374] # [Inner, Outer, Top, Bottom]
+
+# Helper function to calculate distance
 def calculate_distance(p1, p2):
     x1, y1 = p1
     x2, y2 = p2
     return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
 
+# Helper to process a single eye
+def get_eye_ratios(landmarks, iris_id, key_points, frame_w, frame_h):
+    # Extract coordinates
+    def to_coords(id):
+        return int(landmarks[id].x * frame_w), int(landmarks[id].y * frame_h)
+
+    p_iris = to_coords(iris_id)
+    p_inner = to_coords(key_points[0]) # Corner near nose
+    p_outer = to_coords(key_points[1]) # Corner near ear
+    p_top = to_coords(key_points[2])
+    p_bottom = to_coords(key_points[3])
+
+    # 1. BLINK RATIO (Vertical / Horizontal)
+    v_len = calculate_distance(p_top, p_bottom)
+    h_len = calculate_distance(p_inner, p_outer)
+    blink_ratio = v_len / h_len if h_len != 0 else 1.0
+
+    # 2. GAZE RATIO (Horizontal)
+    # Distance from iris to corners
+    dist_inner = abs(p_inner[0] - p_iris[0])
+    dist_outer = abs(p_outer[0] - p_iris[0])
+    total_w = dist_inner + dist_outer
+    # Ratio: 0 = looking at inner corner, 1 = looking at outer corner
+    gaze_ratio_h = dist_inner / total_w if total_w != 0 else 0.5
+
+    # 3. GAZE RATIO (Vertical)
+    dist_top = abs(p_top[1] - p_iris[1])
+    dist_bottom = abs(p_bottom[1] - p_iris[1])
+    total_h = dist_top + dist_bottom
+    gaze_ratio_v = dist_top / total_h if total_h != 0 else 0.5
+
+    # Return data and points for drawing
+    return blink_ratio, gaze_ratio_h, gaze_ratio_v, (p_iris, p_inner, p_outer, p_top, p_bottom)
+
 while True:
-    _, frame = cam.read()
+    ret, frame = cam.read()
+    if not ret: break
+
     frame = cv2.flip(frame, 1)
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame_h, frame_w, _ = frame.shape
+    
     output = face_mesh.process(rgb_frame)
     landmark_points = output.multi_face_landmarks
-    frame_h, frame_w, _ = frame.shape
 
     if landmark_points:
         landmarks = landmark_points[0].landmark
 
-        # --- COORDINATE EXTRACTION ---
-        def get_coords(id):
-            x = int(landmarks[id].x * frame_w)
-            y = int(landmarks[id].y * frame_h)
-            return x, y
-
-        # Gaze Points (Left Eye)
-        iris_center = get_coords(468)
-        left_corner = get_coords(33)   # Inner
-        right_corner = get_coords(133) # Outer
+        # --- PROCESS LEFT EYE ---
+        l_blink, l_gaze_h, l_gaze_v, l_points = get_eye_ratios(
+            landmarks, LEFT_IRIS, LEFT_KEY_POINTS, frame_w, frame_h
+        )
         
-        # Blink Points (Left Eye)
-        top_lid = get_coords(159)
-        bottom_lid = get_coords(145)
+        # --- PROCESS RIGHT EYE ---
+        r_blink, r_gaze_h, r_gaze_v, r_points = get_eye_ratios(
+            landmarks, RIGHT_IRIS, RIGHT_KEY_POINTS, frame_w, frame_h
+        )
 
-        # Draw visual markers
-        cv2.circle(frame, iris_center, 3, (0, 255, 0), -1)
-        cv2.circle(frame, left_corner, 2, (0, 0, 255), -1)
-        cv2.circle(frame, right_corner, 2, (0, 0, 255), -1)
-        cv2.line(frame, top_lid, bottom_lid, (0, 200, 0), 1) # Vertical line for blink
+        # --- DRAW VISUALS ---
+        # Draw Left Eye
+        cv2.circle(frame, l_points[0], 3, (0, 255, 0), -1) # Iris
+        cv2.line(frame, l_points[3], l_points[4], (0, 200, 0), 1) # Blink Line
+        # Draw Right Eye
+        cv2.circle(frame, r_points[0], 3, (0, 255, 0), -1) # Iris
+        cv2.line(frame, r_points[3], r_points[4], (0, 200, 0), 1) # Blink Line
 
-        # =========================================
-        # PART 1: BLINK DETECTION
-        # =========================================
-        
-        # Calculate distances
-        vertical_len = calculate_distance(top_lid, bottom_lid)
-        horizontal_len = calculate_distance(left_corner, right_corner)
-        
-        # Calculate Ratio (Eye Aspect Ratio)
-        if horizontal_len != 0:
-            blink_ratio = vertical_len / horizontal_len
-        else:
-            blink_ratio = 1.0 # Default safe value
 
-        # Blink Check Logic
-        if blink_ratio < BLINK_THRESHOLD:
-            # If counter is 0, this is a "fresh" blink
+        # --- LOGIC 1: BLINK DETECTION (BOTH EYES) ---
+        # We require BOTH eyes to be below threshold to count as a blink
+        if l_blink < BLINK_THRESHOLD and r_blink < BLINK_THRESHOLD:
             if blink_counter_frame == 0:
                 blink_counter += 1
-                blink_counter_frame = 1 # Lock the counter
-                print("BLINK DETECTED!")
+                blink_counter_frame = 1 # Lock
+                print(f"BLINK DETECTED! Total: {blink_counter}")
         else:
-            # Eye is open again
             if blink_counter_frame > 0:
                 blink_counter_frame += 1
-                # Wait 10 frames before allowing next blink (Debouncing)
-                if blink_counter_frame > 10:
+                if blink_counter_frame > 5: # Debounce for 5 frames
                     blink_counter_frame = 0
 
-        # =========================================
-        # PART 2: GAZE TRACKING
-        # =========================================
+
+        # --- LOGIC 2: GAZE DETECTION (AVERAGE) ---
+        # Note: Inner/Outer logic is mirrored for left/right eyes in context of "Left/Right" direction
+        # To simplify: We just need to know if Iris is to the LEFT or RIGHT of the screen.
         
-        # Horizontal Gaze
-        dist_to_left = abs(left_corner[0] - iris_center[0])
-        dist_to_right = abs(right_corner[0] - iris_center[0])
-        total_width = dist_to_left + dist_to_right
+        # Average the ratios to get a stable "Face Gaze"
+        avg_gaze_h = (l_gaze_h + r_gaze_h) / 2
+        avg_gaze_v = (l_gaze_v + r_gaze_v) / 2
         
+        # Determine Horizontal Direction
         hor_text = "CENTER"
-        if total_width != 0:
-            ratio_h = dist_to_left / total_width
-            if ratio_h < 0.42: hor_text = "LEFT"
-            elif ratio_h > 0.58: hor_text = "RIGHT"
+        if avg_gaze_h < 0.45: hor_text = "RIGHT" # Mirrored: Looking "Right" moves iris closer to inner corner of Left eye
+        elif avg_gaze_h > 0.55: hor_text = "LEFT"
 
-        # Vertical Gaze
-        dist_to_top = abs(top_lid[1] - iris_center[1])
-        dist_to_bottom = abs(bottom_lid[1] - iris_center[1])
-        total_height = dist_to_top + dist_to_bottom
-        
+        # Determine Vertical Direction
         ver_text = "CENTER"
-        if total_height != 0:
-            ratio_v = dist_to_top / total_height
-            if ratio_v < 0.35: ver_text = "UP"
-            elif ratio_v > 0.65: ver_text = "DOWN"
+        if avg_gaze_v < 0.35: ver_text = "UP"
+        elif avg_gaze_v > 0.65: ver_text = "DOWN"
 
-        # =========================================
-        # PART 3: DISPLAY
-        # =========================================
-        
-        # Show Gaze Direction
+        # Display Info
         cv2.putText(frame, f"Gaze: {ver_text} - {hor_text}", (20, 50), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-        
-        # Show Blink Count
         cv2.putText(frame, f"Blinks: {blink_counter}", (20, 100), 
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 2)
 
