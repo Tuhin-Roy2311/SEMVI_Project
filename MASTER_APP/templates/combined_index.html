@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Gaze & Emotion Tracker</title>
+    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
+    <style>
+        body { 
+            margin: 0; padding: 0; 
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #1a1a1a; color: white;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            height: 100vh; overflow: hidden;
+        }
+
+        /* --- INFO PANEL (Top) --- */
+        #info-panel {
+            display: flex; gap: 40px; margin-bottom: 20px;
+            font-size: 24px; font-weight: bold;
+            background: #333; padding: 15px 30px; border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+        
+        .stat-box { text-align: center; }
+        .label { font-size: 14px; color: #aaa; display: block; margin-bottom: 5px; }
+        
+        #blink-val { color: cyan; }
+        #emotion-val { color: yellow; text-transform: uppercase; }
+
+        /* --- GALLERY --- */
+        #gallery-container {
+            position: relative;
+            width: 80vw; height: 60vh;
+            border: 3px solid #444; background-color: #000;
+            display: flex; justify-content: center; align-items: center;
+            border-radius: 10px;
+        }
+
+        #current-image {
+            max-width: 100%; max-height: 100%; object-fit: contain;
+        }
+
+        /* --- RED POINTER --- */
+        #gaze-dot {
+            position: fixed;
+            width: 25px; height: 25px;
+            background-color: red;
+            border: 2px solid white; border-radius: 50%;
+            pointer-events: none; z-index: 9999;
+            transform: translate(-50%, -50%);
+            transition: top 0.1s ease-out, left 0.1s ease-out;
+        }
+
+        /* --- CONTROLS --- */
+        #controls { margin-top: 20px; display: flex; gap: 20px; }
+        button {
+            padding: 10px 25px; font-size: 16px; cursor: pointer;
+            background: #444; color: white; border: none; border-radius: 5px;
+        }
+        button:hover { background: #666; }
+    </style>
+</head>
+<body>
+
+    <div id="info-panel">
+        <div class="stat-box">
+            <span class="label">Total Blinks</span>
+            <span id="blink-val">0</span>
+        </div>
+        <div class="stat-box">
+            <span class="label">Current Emotion</span>
+            <span id="emotion-val">Waiting...</span>
+        </div>
+    </div>
+
+    <div id="gaze-dot"></div>
+
+    <div id="gallery-container">
+        <img id="current-image" src="" alt="Loading...">
+    </div>
+
+    <div id="controls">
+        <button onclick="changeImage(-1)">Previous</button>
+        <button onclick="changeImage(1)">Next</button>
+    </div>
+
+    <script>
+        // --- 1. SETUP IMAGES ---
+        const images = [
+            "/static/image1.jpg", 
+            "/static/image2.jpg", 
+            "/static/image3.jpg",
+            "/static/image4.jpg",
+            "/static/image5.jpg"
+        ];
+        let currentIndex = 0;
+        const imgElement = document.getElementById('current-image');
+
+        function updateImage() { imgElement.src = images[currentIndex]; }
+        function changeImage(d) {
+            currentIndex += d;
+            if (currentIndex < 0) currentIndex = images.length - 1;
+            if (currentIndex >= images.length) currentIndex = 0;
+            updateImage();
+        }
+        updateImage();
+
+        // --- 2. CONNECT TO SERVER ---
+        const socket = io();
+        const dot = document.getElementById('gaze-dot');
+        const blinkVal = document.getElementById('blink-val');
+        const emotionVal = document.getElementById('emotion-val');
+
+        // Gaze Update
+        socket.on('gaze_update', (data) => {
+            dot.style.left = (data.x * window.innerWidth) + "px";
+            dot.style.top = (data.y * window.innerHeight) + "px";
+        });
+
+        // Blink Update
+        socket.on('blink_update', (data) => {
+            blinkVal.innerText = data.count;
+            blinkVal.style.color = "white";
+            setTimeout(() => blinkVal.style.color = "cyan", 200);
+        });
+
+        // Emotion Update
+        socket.on('emotion_update', (data) => {
+            emotionVal.innerText = data.emotion;
+            
+            // Optional: Change color based on emotion
+            if(data.emotion === 'happy') emotionVal.style.color = "#0f0";
+            else if(data.emotion === 'angry') emotionVal.style.color = "#f00";
+            else if(data.emotion === 'surprise') emotionVal.style.color = "orange";
+            else emotionVal.style.color = "yellow";
+        });
+    </script>
+</body>
+</html>
