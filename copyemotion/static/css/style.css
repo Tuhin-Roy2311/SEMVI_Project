@@ -1,0 +1,54 @@
+body {
+    margin: 0;
+    background: black;
+    color: lime;
+    overflow: hidden;
+    font-family: Arial, sans-serif;
+}
+
+#startScreen {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+}
+
+#image {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: contain;
+    display: none;
+}
+
+#overlay {
+    display: none;
+}
+
+#emotionText {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    font-size: 20px;
+}
+
+#nav {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+#exitBtn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: red;
+    color: white;
+    border: none;
+    padding: 10px 16px;
+    cursor: pointer;
+}

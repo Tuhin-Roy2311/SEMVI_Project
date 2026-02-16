@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Viewer Emotion Detection</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<div id="startScreen">
+    <h1>Viewer Emotion Detection</h1>
+    <button onclick="startApp()">▶ Start</button>
+</div>
+
+<img id="image">
+
+<div id="overlay">
+    <div id="emotionText">Waiting...</div>
+
+    <div id="nav">
+        <button id="prevBtn" onclick="prev()">← Prev</button>
+        <button id="nextBtn" onclick="next()">Next →</button>
+    </div>
+
+    <button id="exitBtn" onclick="exitApp()">✖ Exit</button>
+</div>
+
+<div id="reportScreen" style="display:none; padding:30px;">
+    <h2>Session Report</h2>
+    <div id="reportContent"></div>
+    <button onclick="location.reload()">Restart</button>
+</div>
+
+<script>
+let images = {{ images | tojson }};
+const imageEmotions = {{ image_emotions | tojson }};
+
+// random order ONCE
+images.sort(() => Math.random() - 0.5);
+
+let idx = 0;
+let poll = null;
+
+// report data
+let viewStart = null;
+let viewTime = {};
+let viewCount = {};
+
+images.forEach(img => {
+    viewTime[img] = 0;
+    viewCount[img] = 0;
+});
+
+function disableNavFor3Sec() {
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+
+    // disable both immediately
+    prevBtn.disabled = true;
+    nextBtn.disabled = true;
+
+    setTimeout(() => {
+        // re-enable based on boundaries
+        prevBtn.disabled = (idx === 0);
+        nextBtn.disabled = (idx === images.length - 1);
+    }, 3000);
+}
+
+function showImage() {
+    document.getElementById("image").src =
+        "/static/images/" + images[idx];
+
+    viewStart = Date.now();
+    viewCount[images[idx]]++;
+
+    // 🔥 THIS IS THE KEY LINE
+    disableNavFor3Sec();
+}
+
+function recordTime() {
+    if (viewStart) {
+        viewTime[images[idx]] += Date.now() - viewStart;
+    }
+}
+
+function startApp() {
+    fetch("/start");
+    document.documentElement.requestFullscreen();
+
+    document.getElementById("startScreen").style.display = "none";
+    document.getElementById("image").style.display = "block";
+    document.getElementById("overlay").style.display = "block";
+
+    showImage();
+
+    poll = setInterval(() => {
+        fetch("/emotion")
+            .then(r => r.json())
+            .then(d => {
+                const imgEmotion = imageEmotions[images[idx]];
+                const viewerEmotion = d.emotion;
+                const match =
+                    (imgEmotion === viewerEmotion && viewerEmotion !== "waiting")
+                        ? 100 : 0;
+
+                document.getElementById("emotionText").innerText =
+                    `Image: ${imgEmotion} | Viewer: ${viewerEmotion} | Match: ${match}%`;
+            });
+    }, 1000);
+}
+
+function next() {
+    if (idx < images.length - 1) {
+        recordTime();
+        idx++;
+        showImage();
+    }
+}
+
+function prev() {
+    if (idx > 0) {
+        recordTime();
+        idx--;
+        showImage();
+    }
+}
+
+function exitApp() {
+    recordTime();
+    fetch("/stop");
+    clearInterval(poll);
+    document.exitFullscreen();
+
+    document.getElementById("overlay").style.display = "none";
+    document.getElementById("image").style.display = "none";
+    document.getElementById("reportScreen").style.display = "block";
+
+    generateReport();
+}
+
+function generateReport() {
+    let html = `<p><b>Total Images Viewed:</b> ${
+        Object.values(viewCount).filter(v => v > 0).length
+    }</p>`;
+
+    html += `<table border="1" cellpadding="8">
+        <tr>
+            <th>Image</th>
+            <th>Emotion</th>
+            <th>Views</th>
+            <th>Time (sec)</th>
+        </tr>`;
+
+    images.forEach(img => {
+        if (viewCount[img] > 0) {
+            html += `
+            <tr>
+                <td>${img}</td>
+                <td>${imageEmotions[img]}</td>
+                <td>${viewCount[img]}</td>
+                <td>${(viewTime[img] / 1000).toFixed(2)}</td>
+            </tr>`;
+        }
+    });
+
+    html += `</table>`;
+    document.getElementById("reportContent").innerHTML = html;
+}
+</script>
+
+</body>
+</html>
