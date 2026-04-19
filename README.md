@@ -1,6 +1,8 @@
-# CopyEmotion: Quadrant Gaze and Emotion Matching
+# IntelliGaze Emotion Engine
 
-CopyEmotion is a Flask-based project that combines:
+Tagline: AI Detection and RAG-Based Interpretation of Attention and Emotional Response
+
+IntelliGaze Emotion Engine is a Flask-based project that combines:
 
 - Real-time eye gaze tracking (4 quadrants)
 - Real-time facial emotion detection
@@ -63,6 +65,7 @@ perfect - Copy/
    - Heatmap PNG
    - Scatter PNG
    - RAG analysis text (Gemini or fallback)
+
 ## Setup
 
 ### 1) Prerequisites
